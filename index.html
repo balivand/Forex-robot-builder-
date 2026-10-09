@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>تأیید پرداخت — ربات ساز فارکس</title>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --card: #121a2b;
+      --text: #e8eefc;
+      --muted: #9aa8c7;
+      --blue: #3b82f6;
+      --green: #22c55e;
+      --red: #ef4444;
+      --border: rgba(148, 163, 184, 0.25);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Tahoma, "Segoe UI", system-ui, sans-serif;
+      background: radial-gradient(1200px 600px at 50% -10%, #1e3a5f 0%, var(--bg) 55%);
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+    }
+    .card {
+      width: 100%;
+      max-width: 440px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px 22px;
+      box-shadow: 0 20px 50px rgba(0,0,0,.35);
+      text-align: center;
+    }
+    .logo { font-size: 1.15rem; font-weight: 800; margin-bottom: 6px; }
+    .sub { color: var(--muted); font-size: 0.85rem; margin-bottom: 22px; }
+    .status { font-size: 1.05rem; font-weight: 700; line-height: 1.6; margin: 12px 0 8px; }
+    .status.ok { color: var(--green); }
+    .status.err { color: var(--red); }
+    .status.wait { color: #93c5fd; }
+    .detail { color: var(--muted); font-size: 0.82rem; line-height: 1.7; margin-top: 8px; }
+    .box {
+      margin-top: 16px; text-align: right;
+      background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+      border-radius: 12px; padding: 12px 14px; font-size: 0.8rem;
+      line-height: 1.8; color: var(--muted); display: none;
+    }
+    .box strong { color: var(--text); }
+    .btn {
+      display: inline-block; margin-top: 20px; padding: 12px 18px;
+      border-radius: 10px; border: none;
+      background: linear-gradient(135deg, var(--blue), #2563eb);
+      color: #fff; font-weight: 700; font-size: 0.9rem; text-decoration: none;
+    }
+    .hint { margin-top: 16px; font-size: 0.75rem; color: var(--muted); line-height: 1.5; }
+    .ltr { direction: ltr; unicode-bidi: embed; font-size: 0.72rem; color: #cbd5e1; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">ربات ساز فارکس</div>
+    <div class="sub">تأیید پرداخت کافه‌بازار</div>
+    <div id="status" class="status wait">در حال بررسی پرداخت…</div>
+    <div id="detail" class="detail"></div>
+    <div id="receipt" class="box"></div>
+    <a class="btn" id="openAppBtn" href="forexrobotbuilder://home" style="display:none">باز کردن برنامه</a>
+    <div class="hint">
+      رسید این خرید در سیستم ثبت می‌شود و برای پیگیری پشتیبانی قابل استفاده است.
+      اگر برنامه خودکار باز نشد، آن را از کافه‌بازار باز کنید و وارد حساب خود شوید.
+    </div>
+  </div>
+  <script>
+    var FRB_SUPABASE_URL = 'https://xkoukrklqdvczpmcqsrx.supabase.co';
+    var FRB_VERIFY_PATH = '/functions/v1/verify-bazaar-purchase';
+    function qs(name) {
+      try { return new URLSearchParams(window.location.search).get(name); }
+      catch (e) { return null; }
+    }
+    function setStatus(kind, title, detail) {
+      var el = document.getElementById('status');
+      var d = document.getElementById('detail');
+      el.className = 'status ' + (kind || '');
+      el.textContent = title || '';
+      d.textContent = detail || '';
+      if (kind === 'ok') document.getElementById('openAppBtn').style.display = 'inline-block';
+    }
+    function formatUntil(iso) {
+      if (!iso) return '—';
+      try {
+        var dt = new Date(iso);
+        if (isNaN(dt.getTime())) return String(iso);
+        return dt.toLocaleDateString('fa-IR');
+      } catch (e) { return String(iso); }
+    }
+    function showReceipt(info) {
+      var box = document.getElementById('receipt');
+      box.style.display = 'block';
+      var lines = [];
+      if (info.sku) lines.push('<div><strong>محصول:</strong> ' + info.sku + '</div>');
+      if (info.amount != null) lines.push('<div><strong>مبلغ:</strong> ' + Number(info.amount).toLocaleString('fa-IR') + ' تومان</div>');
+      if (info.pro_until) lines.push('<div><strong>اعتبار تا:</strong> ' + formatUntil(info.pro_until) + '</div>');
+      if (info.purchase_id) lines.push('<div><strong>شماره پیگیری:</strong> <span class="ltr">' + info.purchase_id + '</span></div>');
+      if (info.token_short) lines.push('<div><strong>توکن:</strong> <span class="ltr">' + info.token_short + '</span></div>');
+      if (info.history_saved === false) {
+        lines.push('<div style="color:#fbbf24">توجه: اشتراک فعال شد؛ ثبت تاریخچه با خطا مواجه شد.</div>');
+      } else if (info.history_saved) {
+        lines.push('<div style="color:#86efac">رسید در تاریخچه پرداخت ذخیره شد.</div>');
+      }
+      box.innerHTML = lines.join('');
+    }
+    async function main() {
+      var token = qs('purchaseToken') || qs('token');
+      var uid = qs('uid') || qs('userId');
+      var sku = qs('sku') || 'Frbm';
+      var email = qs('email') || '';
+      var response = qs('response');
+      if (response && response !== 'ok' && !token) {
+        setStatus('err', 'پرداخت انجام نشد یا لغو شد.', 'می‌توانید به برنامه برگردید و دوباره تلاش کنید.');
+        return;
+      }
+      if (!token) {
+        setStatus('err', 'رسید پرداخت یافت نشد.', 'دوباره از داخل اپ اقدام به پرداخت کنید.');
+        return;
+      }
+      if (!uid) {
+        setStatus('err', 'شناسه کاربر همراه رسید نیست.', 'از داخل اپ (با ورود به حساب) دوباره پرداخت کنید.');
+        return;
+      }
+      setStatus('wait', 'در حال تأیید خرید و ثبت رسید…', 'لطفاً چند لحظه صبر کنید.');
+      try {
+        var res = await fetch(FRB_SUPABASE_URL + FRB_VERIFY_PATH, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: uid, email: email, sku: sku, purchaseToken: token,
+            plan: 'pro', gateway: 'bazaar', amount: 300000, currency: 'IRT'
+          })
+        });
+        var data = {};
+        try { data = await res.json(); } catch (e) { data = {}; }
+        if (!res.ok || data.ok === false || data.error) {
+          throw new Error(data.error || ('خطای سرور ' + res.status));
+        }
+        var until = data.pro_until || (data.purchase && data.purchase.pro_until);
+        var untilText = until
+          ? ('اشتراک Pro شما تا تاریخ ' + formatUntil(until) + ' فعال است.')
+          : 'اشتراک Pro برای حساب شما فعال شد.';
+        setStatus('ok', 'خرید شما تأیید شد.', untilText + ' لطفاً برنامه را باز کنید.');
+        showReceipt({
+          sku: data.sku || sku, amount: 300000, pro_until: until,
+          purchase_id: data.purchase && data.purchase.id,
+          token_short: token.slice(0, 10) + '…',
+          history_saved: data.history_saved
+        });
+      } catch (err) {
+        setStatus('err', 'تأیید خرید ناموفق بود.',
+          (err && err.message ? err.message : String(err)) +
+          ' اگر مبلغ کم شده، به پشتیبانی پیام دهید.');
+      }
+    }
+    main();
+  </script>
+</body>
+</html>
