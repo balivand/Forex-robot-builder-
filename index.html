@@ -46,8 +46,8 @@
     .ltr { direction: ltr; unicode-bidi: embed; font-size: 0.72rem; color: #cbd5e1; word-break: break-all; }
     .debug {
       margin-top: 12px; text-align: left; direction: ltr; font-size: 0.62rem;
-      color: #64748b; word-break: break-all; max-height: 100px; overflow: auto;
-      background: rgba(0,0,0,.25); padding: 8px; border-radius: 8px;
+      color: #64748b; word-break: break-all; max-height: 110px; overflow: auto;
+      background: rgba(0,0,0,.25); border-radius: 8px; padding: 8px;
     }
   </style>
 </head>
@@ -56,148 +56,143 @@
     <div class="logo">ربات ساز فارکس</div>
     <div class="sub">تأیید پرداخت کافه‌بازار</div>
     <div id="status" class="status wait">در حال بررسی پرداخت…</div>
-    <div id="detail" class="detail"></div>
+    <div id="detail" class="detail">لطفاً صبر کنید.</div>
     <div id="receipt" class="box"></div>
-    <button type="button" class="btn" id="openAppBtn" style="display:none">باز کردن برنامه</button>
-    <div class="hint">
-      اگر برنامه باز نشد، از کافه‌بازار آن را باز کنید و وارد حساب شوید.
-    </div>
+    <button class="btn" id="openAppBtn" type="button">بازگشت به برنامه</button>
+    <div class="hint">اگر برنامه باز نشد، از کافه‌بازار آن را باز کنید و وارد حساب شوید.</div>
     <div id="debug" class="debug"></div>
   </div>
+
   <script>
 (function () {
   var SUPABASE_URL = 'https://xkoukrklqdvczpmcqsrx.supabase.co';
-  var ANON_KEY = 'sb_publishable_OK6XC9JrK3n1xa3ugAFcIw_k4tvrVoj';
   var VERIFY_URL = SUPABASE_URL + '/functions/v1/verify-bazaar-purchase';
 
-  function qsAll() {
+  function $(id) { return document.getElementById(id); }
+
+  function setStatus(kind, title, detail) {
+    var st = $('status');
+    var de = $('detail');
+    if (st) {
+      st.className = 'status ' + kind;
+      st.textContent = title;
+    }
+    if (de) de.textContent = detail || '';
+  }
+
+  function dbg(msg) {
+    var el = $('debug');
+    if (el) el.textContent = String(msg || '');
+  }
+
+  function formatUntil(iso) {
+    try {
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return String(iso);
+      return d.toLocaleDateString('fa-IR');
+    } catch (e) {
+      return String(iso);
+    }
+  }
+
+  function showReceipt(info) {
+    var box = $('receipt');
+    if (!box || !info) return;
+    var lines = [];
+    if (info.sku) lines.push('<div><strong>محصول:</strong> ' + info.sku + '</div>');
+    if (info.amount != null) {
+      lines.push('<div><strong>مبلغ:</strong> ' + Number(info.amount).toLocaleString('fa-IR') + ' تومان</div>');
+    }
+    if (info.pro_until) {
+      lines.push('<div><strong>اعتبار تا:</strong> ' + formatUntil(info.pro_until) + '</div>');
+    }
+    if (info.token_short) {
+      lines.push('<div class="ltr"><strong>token:</strong> ' + info.token_short + '</div>');
+    }
+    box.innerHTML = lines.join('');
+    box.style.display = 'block';
+  }
+
+  function readParams() {
     var out = {};
     try {
-      var sp = new URLSearchParams(window.location.search);
-      sp.forEach(function (v, k) { out[k] = v; });
+      var q = new URLSearchParams(window.location.search || '');
+      q.forEach(function (v, k) { out[k] = v; });
     } catch (e) {}
-    // also parse hash ?a=1 style
     try {
-      var h = (window.location.hash || '').replace(/^#/, '');
-      if (h.indexOf('=') >= 0) {
-        var sp2 = new URLSearchParams(h.indexOf('?') >= 0 ? h.split('?')[1] : h);
-        sp2.forEach(function (v, k) { if (!out[k]) out[k] = v; });
+      var h = String(window.location.hash || '').replace(/^#/, '');
+      if (h) {
+        var hq = new URLSearchParams(h.indexOf('=') >= 0 ? h : h.replace(/\?/g, '&'));
+        hq.forEach(function (v, k) {
+          if (out[k] == null || out[k] === '') out[k] = v;
+        });
       }
     } catch (e2) {}
     return out;
   }
 
-  function qs(name) {
-    var all = qsAll();
-    return all[name] || null;
-  }
-
-  function setStatus(kind, title, detail) {
-    var el = document.getElementById('status');
-    var d = document.getElementById('detail');
-    el.className = 'status ' + (kind || '');
-    el.textContent = title || '';
-    d.textContent = detail || '';
-    if (kind === 'ok') document.getElementById('openAppBtn').style.display = 'inline-block';
-  }
-
-  function dbg(msg) {
-    try { document.getElementById('debug').textContent = String(msg || ''); } catch (e) {}
-  }
-
-  function formatUntil(iso) {
-    if (!iso) return '—';
+  function readPending() {
     try {
-      var dt = new Date(iso);
-      if (isNaN(dt.getTime())) return String(iso);
-      return dt.toLocaleDateString('fa-IR');
-    } catch (e) { return String(iso); }
+      var raw = localStorage.getItem('frb_bazaar_pending') || sessionStorage.getItem('frb_bazaar_pending');
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (e) {
+      return null;
+    }
   }
 
-  function showReceipt(info) {
-    var box = document.getElementById('receipt');
-    box.style.display = 'block';
-    var lines = [];
-    if (info.sku) lines.push('<div><strong>محصول:</strong> ' + info.sku + '</div>');
-    if (info.amount != null) lines.push('<div><strong>مبلغ:</strong> ' + Number(info.amount).toLocaleString('fa-IR') + ' تومان</div>');
-    if (info.pro_until) lines.push('<div><strong>اعتبار تا:</strong> ' + formatUntil(info.pro_until) + '</div>');
-    if (info.token_short) lines.push('<div><strong>توکن:</strong> <span class="ltr">' + info.token_short + '</span></div>');
-    box.innerHTML = lines.join('');
+  function amountForSku(sku) {
+    var s = String(sku || '').toLowerCase();
+    if (s === 'frbtest') return 10000;
+    if (s === 'frbs') return 990000;
+    return 490000;
   }
 
-  function xhrPost(url, jsonBody, useAuth) {
-    return new Promise(function (resolve, reject) {
-      var xhr = new XMLHttpRequest();
-      xhr.open('POST', url, true);
-      xhr.setRequestHeader('Content-Type', 'application/json');
-      if (useAuth) {
-        try { xhr.setRequestHeader('apikey', ANON_KEY); } catch (e1) {}
-        try { xhr.setRequestHeader('Authorization', 'Bearer ' + ANON_KEY); } catch (e2) {}
-      }
-      xhr.onreadystatechange = function () {
-        if (xhr.readyState !== 4) return;
+  function daysForSku(sku) {
+    var s = String(sku || '').toLowerCase();
+    if (s === 'frbtest') return 1;
+    if (s === 'frbs') return 90;
+    return 30;
+  }
+
+  function post(body) {
+    return fetch(VERIFY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body
+    }).then(function (res) {
+      return res.text().then(function (txt) {
         var data = {};
-        try { data = xhr.responseText ? JSON.parse(xhr.responseText) : {}; }
-        catch (e) { data = { raw: String(xhr.responseText || '').slice(0, 200) }; }
-        resolve({ status: xhr.status, ok: xhr.status >= 200 && xhr.status < 300, data: data });
-      };
-      xhr.onerror = function () { reject(new Error('network_error')); };
-      xhr.timeout = 30000;
-      xhr.ontimeout = function () { reject(new Error('timeout')); };
-      xhr.send(jsonBody);
+        try { data = JSON.parse(txt || '{}'); } catch (e) { data = { raw: txt }; }
+        return { status: res.status, data: data };
+      });
     });
   }
 
-  function pickToken(all) {
-    var keys = ['purchaseToken', 'token', 'purchase_token', 'purchaseData', 'data', 'purchaseToken'.toLowerCase()];
-    for (var i = 0; i < keys.length; i++) {
-      if (all[keys[i]]) return all[keys[i]];
-    }
-    // scan any key containing "token"
-    for (var k in all) {
-      if (/token/i.test(k) && all[k]) return all[k];
-    }
-    return '';
-  }
-
-  function pickUid(all) {
-    return all.u || all.uid || all.userId || all.user_id || '';
-  }
-
-  function pickSku(all) {
-    return all.s || all.sku || all.productId || 'frbtest';
-  }
-
-  function loadPending() {
-    try {
-      var raw = localStorage.getItem('frb_bazaar_pending') || sessionStorage.getItem('frb_bazaar_pending');
-      if (raw) return JSON.parse(raw);
-    } catch (e) {}
-    return null;
-  }
-
-  document.getElementById('openAppBtn').onclick = function () {
+  $('openAppBtn').onclick = function () {
     try { window.location.href = 'forexrobotbuilder://home'; } catch (e) {}
   };
 
   function run() {
-    var all = qsAll();
-    var token = pickToken(all);
-    var uid = pickUid(all);
-    var sku = pickSku(all);
-    var email = all.email || '';
-    var response = all.response || '';
-    var pending = loadPending();
+    var p = readParams();
+    var pending = readPending();
 
-    // If same WebView as app, pending may have uid
+    var token = p.purchaseToken || p.token || p.purchase_token || '';
+    var uid = p.uid || p.u || p.userId || p.user_id || '';
+    var sku = p.sku || p.s || p.productId || 'Frbm';
+    var email = p.email || '';
+    var response = p.response || '';
+
+    if ((!sku || String(sku).toLowerCase() === 'frbtest') && pending && pending.sku) {
+      sku = pending.sku;
+    }
     if (!uid && pending && pending.userId) uid = pending.userId;
-    if ((!sku || sku === 'frbtest') && pending && pending.sku) sku = pending.sku;
     if (!email && pending && pending.email) email = pending.email;
 
     dbg(
-      'href=' + String(window.location.href).slice(0, 180) +
-      '\nkeys=' + Object.keys(all).join(',') +
-      '\nsku=' + sku +
+      'href=' + String(window.location.href).slice(0, 200) +
+      '\nkeys=' + Object.keys(p).join(',') +
+      ' sku=' + sku +
       ' uid=' + (uid ? String(uid).slice(0, 8) + '…' : 'none') +
       ' token=' + (token ? String(token).slice(0, 10) + '…' : 'none') +
       ' pending=' + (pending ? 'yes' : 'no')
@@ -208,43 +203,54 @@
       return;
     }
     if (!token) {
-      setStatus('err', 'رسید پرداخت (purchaseToken) در آدرس برگشت نیست.',
-        'بازار باید بعد از پرداخت توکن را به آدرس سایت اضافه کند. آدرس کامل نوار مرورگر را برای پشتیبانی بفرستید.');
+      setStatus(
+        'err',
+        'رسید پرداخت (purchaseToken) در آدرس برگشت نیست.',
+        'از داخل اپ دوباره پرداخت کنید. اگر مبلغ کم شده به پشتیبانی پیام دهید.'
+      );
       return;
     }
     if (!uid) {
-      setStatus('err', 'شناسه کاربر در آدرس نیست.',
-        'از داخل اپ وارد حساب شوید و دوباره پرداخت کنید.');
+      setStatus(
+        'err',
+        'شناسه کاربر در آدرس نیست.',
+        'از داخل اپ وارد حساب شوید و دوباره پرداخت کنید.'
+      );
       return;
     }
 
     setStatus('wait', 'در حال تأیید خرید…', 'لطفاً صبر کنید.');
 
-    var amount = (String(sku).toLowerCase() === 'frbtest') ? 10000 : 300000;
+    var amount = amountForSku(sku);
     if (pending && pending.amount) amount = pending.amount;
+    var periodDays = daysForSku(sku);
 
     var body = JSON.stringify({
       userId: String(uid),
-      email: String(email),
+      email: String(email || ''),
       sku: String(sku),
       purchaseToken: String(token),
       plan: 'pro',
       gateway: 'bazaar',
       amount: amount,
-      currency: 'IRT'
+      currency: 'IRT',
+      periodDays: periodDays
     });
 
-    xhrPost(VERIFY_URL, body, true)
-      .catch(function () { return xhrPost(VERIFY_URL, body, false); })
+    post(body)
       .then(function (result) {
         var data = result.data || {};
-        if (!result.ok || data.ok === false || data.error) {
-          throw new Error(data.error || data.detail || ('HTTP ' + result.status));
+        if (result.status < 200 || result.status >= 300 || data.ok === false || data.error) {
+          throw new Error(
+            data.error || data.detail ||
+            ('HTTP ' + result.status + ' ' + JSON.stringify(data).slice(0, 120))
+          );
         }
         try {
           localStorage.removeItem('frb_bazaar_pending');
           sessionStorage.removeItem('frb_bazaar_pending');
         } catch (e) {}
+
         var until = data.pro_until || (data.purchase && data.purchase.pro_until);
         var untilText = until
           ? ('اشتراک Pro تا ' + formatUntil(until) + ' فعال است.')
@@ -258,9 +264,12 @@
         });
       })
       .catch(function (err) {
-        setStatus('err', 'تأیید خرید ناموفق بود.',
+        setStatus(
+          'err',
+          'تأیید خرید ناموفق بود.',
           (err && err.message ? err.message : String(err)) +
-          ' اگر مبلغ کم شده به پشتیبانی پیام دهید.');
+          ' اگر مبلغ کم شده به پشتیبانی پیام دهید.'
+        );
       });
   }
 
