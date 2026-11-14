@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <title>تأیید پرداخت — ربات ساز فارکس</title>
+  <style>
+    :root {
+      --bg: #0b1220; --card: #121a2b; --text: #e8eefc; --muted: #9aa8c7;
+      --blue: #3b82f6; --green: #22c55e; --red: #ef4444;
+      --border: rgba(148, 163, 184, 0.25);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh;
+      font-family: Tahoma, "Segoe UI", system-ui, sans-serif;
+      background: radial-gradient(1200px 600px at 50% -10%, #1e3a5f 0%, var(--bg) 55%);
+      color: var(--text); display: flex; align-items: center; justify-content: center;
+      padding: 24px 16px;
+    }
+    .card {
+      width: 100%; max-width: 440px; background: var(--card);
+      border: 1px solid var(--border); border-radius: 16px; padding: 28px 22px;
+      box-shadow: 0 20px 50px rgba(0,0,0,.35); text-align: center;
+    }
+    .logo { font-size: 1.15rem; font-weight: 800; margin-bottom: 6px; }
+    .sub { color: var(--muted); font-size: 0.85rem; margin-bottom: 22px; }
+    .status { font-size: 1.05rem; font-weight: 700; line-height: 1.6; margin: 12px 0 8px; }
+    .status.ok { color: var(--green); }
+    .status.err { color: var(--red); }
+    .status.wait { color: #93c5fd; }
+    .detail { color: var(--muted); font-size: 0.82rem; line-height: 1.7; margin-top: 8px; word-break: break-word; }
+    .box {
+      margin-top: 16px; text-align: right; background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px;
+      font-size: 0.8rem; line-height: 1.8; color: var(--muted); display: none;
+    }
+    .box strong { color: var(--text); }
+    .btn {
+      display: inline-block; margin-top: 20px; padding: 12px 18px; border-radius: 10px;
+      border: none; background: linear-gradient(135deg, var(--blue), #2563eb);
+      color: #fff; font-weight: 700; font-size: 0.9rem; text-decoration: none; cursor: pointer;
+    }
+    .hint { margin-top: 16px; font-size: 0.75rem; color: var(--muted); line-height: 1.5; }
+    .ltr { direction: ltr; unicode-bidi: embed; font-size: 0.72rem; color: #cbd5e1; word-break: break-all; }
+    .debug {
+      margin-top: 12px; text-align: left; direction: ltr; font-size: 0.62rem;
+      color: #64748b; word-break: break-all; max-height: 110px; overflow: auto;
+      background: rgba(0,0,0,.25); border-radius: 8px; padding: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">ربات ساز فارکس</div>
+    <div class="sub">تأیید پرداخت کافه‌بازار</div>
+    <div id="status" class="status wait">در حال بررسی پرداخت…</div>
+    <div id="detail" class="detail">لطفاً صبر کنید.</div>
+    <div id="receipt" class="box"></div>
+    <button class="btn" id="openAppBtn" type="button">بازگشت به برنامه</button>
+    <div class="hint">اگر برنامه باز نشد، از کافه‌بازار آن را باز کنید و وارد حساب شوید.</div>
+    <div id="debug" class="debug"></div>
+  </div>
+
+  <script>
+(function () {
+  var SUPABASE_URL = 'https://xkoukrklqdvczpmcqsrx.supabase.co';
+  var VERIFY_URL = SUPABASE_URL + '/functions/v1/verify-bazaar-purchase';
+
+  function $(id) { return document.getElementById(id); }
+
+  function setStatus(kind, title, detail) {
+    var st = $('status');
+    var de = $('detail');
+    if (st) {
+      st.className = 'status ' + kind;
+      st.textContent = title;
+    }
+    if (de) de.textContent = detail || '';
+  }
+
+  function dbg(msg) {
+    var el = $('debug');
+    if (el) el.textContent = String(msg || '');
+  }
+
+  function formatUntil(iso) {
+    try {
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return String(iso);
+      return d.toLocaleDateString('fa-IR');
+    } catch (e) {
+      return String(iso);
+    }
+  }
+
+  function showReceipt(info) {
+    var box = $('receipt');
+    if (!box || !info) return;
+    var lines = [];
+    if (info.sku) lines.push('<div><strong>محصول:</strong> ' + info.sku + '</div>');
+    if (info.amount != null) {
+      lines.push('<div><strong>مبلغ:</strong> ' + Number(info.amount).toLocaleString('fa-IR') + ' تومان</div>');
+    }
+    if (info.pro_until) {
+      lines.push('<div><strong>اعتبار تا:</strong> ' + formatUntil(info.pro_until) + '</div>');
+    }
+    if (info.token_short) {
+      lines.push('<div class="ltr"><strong>token:</strong> ' + info.token_short + '</div>');
+    }
+    box.innerHTML = lines.join('');
+    box.style.display = 'block';
+  }
+
+  function readParams() {
+    var out = {};
+    try {
+      var q = new URLSearchParams(window.location.search || '');
+      q.forEach(function (v, k) { out[k] = v; });
+    } catch (e) {}
+    try {
+      var h = String(window.location.hash || '').replace(/^#/, '');
+      if (h) {
+        var hq = new URLSearchParams(h.indexOf('=') >= 0 ? h : h.replace(/\?/g, '&'));
+        hq.forEach(function (v, k) {
+          if (out[k] == null || out[k] === '') out[k] = v;
+        });
+      }
+    } catch (e2) {}
+    return out;
+  }
+
+  function readPending() {
+    try {
+      var raw = localStorage.getItem('frb_bazaar_pending') || sessionStorage.getItem('frb_bazaar_pending');
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function amountForSku(sku) {
+    var s = String(sku || '').toLowerCase();
+    if (s === 'frbtest') return 10000;
+    if (s === 'frbs') return 990000;
+    return 490000;
+  }
+
+  function daysForSku(sku) {
+    var s = String(sku || '').toLowerCase();
+    if (s === 'frbtest') return 1;
+    if (s === 'frbs') return 90;
+    return 30;
+  }
+
+  function post(body) {
+    return fetch(VERIFY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body
+    }).then(function (res) {
+      return res.text().then(function (txt) {
+        var data = {};
+        try { data = JSON.parse(txt || '{}'); } catch (e) { data = { raw: txt }; }
+        return { status: res.status, data: data };
+      });
+    });
+  }
+
+  $('openAppBtn').onclick = function () {
+    try { window.location.href = 'forexrobotbuilder://home'; } catch (e) {}
+  };
+
+  function run() {
+    var p = readParams();
+    var pending = readPending();
+
+    var token = p.purchaseToken || p.token || p.purchase_token || '';
+    var uid = p.uid || p.u || p.userId || p.user_id || '';
+    var sku = p.sku || p.s || p.productId || 'Frbm';
+    var email = p.email || '';
+    var response = p.response || '';
+
+    if ((!sku || String(sku).toLowerCase() === 'frbtest') && pending && pending.sku) {
+      sku = pending.sku;
+    }
+    if (!uid && pending && pending.userId) uid = pending.userId;
+    if (!email && pending && pending.email) email = pending.email;
+
+    dbg(
+      'href=' + String(window.location.href).slice(0, 200) +
+      '\nkeys=' + Object.keys(p).join(',') +
+      ' sku=' + sku +
+      ' uid=' + (uid ? String(uid).slice(0, 8) + '…' : 'none') +
+      ' token=' + (token ? String(token).slice(0, 10) + '…' : 'none') +
+      ' pending=' + (pending ? 'yes' : 'no')
+    );
+
+    if (response && response !== 'ok' && !token) {
+      setStatus('err', 'پرداخت انجام نشد یا لغو شد.', 'به برنامه برگردید و دوباره تلاش کنید.');
+      return;
+    }
+    if (!token) {
+      setStatus(
+        'err',
+        'رسید پرداخت (purchaseToken) در آدرس برگشت نیست.',
+        'از داخل اپ دوباره پرداخت کنید. اگر مبلغ کم شده به پشتیبانی پیام دهید.'
+      );
+      return;
+    }
+    if (!uid) {
+      setStatus(
+        'err',
+        'شناسه کاربر در آدرس نیست.',
+        'از داخل اپ وارد حساب شوید و دوباره پرداخت کنید.'
+      );
+      return;
+    }
+
+    setStatus('wait', 'در حال تأیید خرید…', 'لطفاً صبر کنید.');
+
+    var amount = amountForSku(sku);
+    if (pending && pending.amount) amount = pending.amount;
+    var periodDays = daysForSku(sku);
+
+    var body = JSON.stringify({
+      userId: String(uid),
+      email: String(email || ''),
+      sku: String(sku),
+      purchaseToken: String(token),
+      plan: 'pro',
+      gateway: 'bazaar',
+      amount: amount,
+      currency: 'IRT',
+      periodDays: periodDays
+    });
+
+    post(body)
+      .then(function (result) {
+        var data = result.data || {};
+        if (result.status < 200 || result.status >= 300 || data.ok === false || data.error) {
+          throw new Error(
+            data.error || data.detail ||
+            ('HTTP ' + result.status + ' ' + JSON.stringify(data).slice(0, 120))
+          );
+        }
+        try {
+          localStorage.removeItem('frb_bazaar_pending');
+          sessionStorage.removeItem('frb_bazaar_pending');
+        } catch (e) {}
+
+        var until = data.pro_until || (data.purchase && data.purchase.pro_until);
+        var untilText = until
+          ? ('اشتراک Pro تا ' + formatUntil(until) + ' فعال است.')
+          : 'اشتراک Pro فعال شد.';
+        setStatus('ok', 'خرید شما تأیید شد.', untilText + ' برنامه را باز کنید.');
+        showReceipt({
+          sku: data.sku || sku,
+          amount: amount,
+          pro_until: until,
+          token_short: String(token).slice(0, 12) + '…'
+        });
+      })
+      .catch(function (err) {
+        setStatus(
+          'err',
+          'تأیید خرید ناموفق بود.',
+          (err && err.message ? err.message : String(err)) +
+          ' اگر مبلغ کم شده به پشتیبانی پیام دهید.'
+        );
+      });
+  }
+
+  run();
+})();
+  </script>
+</body>
+</html>
